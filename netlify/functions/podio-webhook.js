@@ -19,7 +19,7 @@ exports.handler = async (event, context) => {
         const data = Object.fromEntries(params);
         console.log('📊 Datos recibidos:', JSON.stringify(data, null, 2));
 
-        // VERIFICACIÓN WEBHOOK
+        // VERIFICACIÓN WEBHOOK - MINIMALISTA
         if (params.get('type') === 'hook.verify') {
             const code = params.get('code');
             const hookId = params.get('hook_id');
@@ -31,8 +31,7 @@ exports.handler = async (event, context) => {
             const response = {
                 statusCode: 200,
                 headers: { 
-                    'Content-Type': 'text/plain',
-                    'Cache-Control': 'no-cache'
+                    'Content-Type': 'text/plain'
                 },
                 body: code
             };
@@ -55,6 +54,10 @@ exports.handler = async (event, context) => {
 
         console.log('📨 Respuesta de Make:', response.status, response.statusText);
         
+        if (!response.ok) {
+            console.error('❌ Error en Make:', await response.text());
+        }
+
         return {
             statusCode: 200,
             headers: { 'Content-Type': 'text/plain' },
