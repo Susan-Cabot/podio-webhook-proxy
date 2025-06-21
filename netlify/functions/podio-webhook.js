@@ -1,5 +1,7 @@
 exports.handler = async (event, context) => {
     console.log('🔔 Webhook recibido:', new Date().toISOString());
+    console.log('📝 Method:', event.httpMethod);
+    console.log('📝 Headers:', JSON.stringify(event.headers, null, 2));
     
     if (event.httpMethod !== 'POST') {
         console.log('❌ Método no permitido:', event.httpMethod);
@@ -11,22 +13,34 @@ exports.handler = async (event, context) => {
     }
 
     try {
+        console.log('📝 Raw body:', event.body);
         const body = event.body;
         const params = new URLSearchParams(body);
         const data = Object.fromEntries(params);
-        console.log('📊 Datos recibidos:', data);
+        console.log('📊 Datos recibidos:', JSON.stringify(data, null, 2));
 
         // VERIFICACIÓN WEBHOOK
         if (params.get('type') === 'hook.verify') {
             const code = params.get('code');
             const hookId = params.get('hook_id');
-            console.log('✅ VERIFICACIÓN solicitada - Hook:', hookId, 'Código:', code);
             
-            return {
+            console.log('✅ VERIFICACIÓN solicitada');
+            console.log('📝 Hook ID:', hookId);
+            console.log('🔑 Código recibido:', code);
+            
+            const response = {
                 statusCode: 200,
-                headers: { 'Content-Type': 'text/plain', 'Cache-Control': 'no-cache' },
+                headers: { 
+                    'Content-Type': 'text/plain',
+                    'Cache-Control': 'no-cache'
+                },
                 body: code
             };
+            
+            console.log('📤 Enviando respuesta:', JSON.stringify(response, null, 2));
+            console.log('📤 Body de respuesta:', code);
+            
+            return response;
         }
 
         // DATOS REALES → MAKE
