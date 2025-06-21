@@ -31,9 +31,9 @@ exports.handler = async (event, context) => {
         body: code
       };
 
-      // PASO 2: Probar múltiples endpoints en paralelo
-      testMultipleEndpoints(hookId, code).catch(error => {
-        console.error('❌ Error en pruebas de endpoints:', error);
+      // PASO 2: Probar UN endpoint simple con timeout
+      testSingleEndpoint(hookId, code).catch(error => {
+        console.error('❌ Error en prueba de endpoint:', error);
       });
 
       return webhookResponse;
@@ -67,14 +67,17 @@ exports.handler = async (event, context) => {
   }
 };
 
-// Función para probar múltiples endpoints y métodos
-async function testMultipleEndpoints(hookId, code) {
-  console.log('🧪 Iniciando pruebas de múltiples endpoints...');
+// Función para probar UN endpoint simple con timeout
+async function testSingleEndpoint(hookId, code) {
+  console.log('🧪 Probando endpoint simple...');
   
   try {
     console.log('🔐 Solicitando token OAuth...');
     
-    // Obtener token OAuth
+    // Obtener token OAuth con timeout
+    const tokenController = new AbortController();
+    const tokenTimeout = setTimeout(() => tokenController.abort(), 5000); // 5s timeout
+    
     const tokenResponse = await fetch('https://api.podio.com/oauth/token', {
       method: 'POST',
       headers: {
@@ -86,9 +89,11 @@ async function testMultipleEndpoints(hookId, code) {
         'app_token': 'fe2e7087f07470d142a5b883ef4a647e',
         'client_id': 'api-regenerated',
         'client_secret': '9aEYP3rg0TEW53ywIbfXaelov3A9gIumQImsmQK3kERa3PY0JIqadWXKrglZtVvR'
-      })
+      }),
+      signal: tokenController.signal
     });
 
+    clearTimeout(tokenTimeout);
     console.log('📡 Respuesta OAuth status:', tokenResponse.status);
 
     if (!tokenResponse.ok) {
@@ -101,80 +106,82 @@ async function testMultipleEndpoints(hookId, code) {
     const accessToken = tokenData.access_token;
     console.log('✅ Token OAuth obtenido exitosamente');
 
-    // Lista REDUCIDA de endpoints más probables
-    const endpointsToTest = [
-      // Basado en tu análisis (sin /verify) - ESTE ES EL MÁS PROBABLE
-      { 
-        url: `https://api.podio.com/hook/${hookId}/validate`, 
-        method: 'POST',
-        name: 'POST /hook/{id}/validate'
-      },
-      // Estructura alternativa 
-      { 
-        url: `https://api.podio.com/hook/validate/${hookId}`, 
-        method: 'POST',
-        name: 'POST /hook/validate/{id}'
-      },
-      // Solo el hook ID (como sugiere la documentación)
-      { 
-        url: `https://api.podio.com/hook/${hookId}`, 
-        method: 'POST',
-        name: 'POST /hook/{id}'
-      }
-    ];
-
-    console.log(`🧪 Probando ${endpointsToTest.length} endpoints principales...`);
-
-    // Solo JSON body (más probable)
+    // Probar SOLO el endpoint más probable con timeout corto
+    const endpoint = `https://api.podio.com/hook/${hookId}/validate`;
     const requestBody = JSON.stringify({ code: code });
-    console.log(`📄 Body a usar: ${requestBody}`);
+    
+    console.log(`🧪 Probando: ${endpoint}`);
+    console.log(`📄 Body: ${requestBody}`);
 
-    // Probar cada endpoint SECUENCIALMENTE con logs inmediatos
-    for (let i = 0; i < endpointsToTest.length; i++) {
-      const endpoint = endpointsToTest[i];
-      console.log(`\n${i+1}/${endpointsToTest.length} 🧪 Probando: ${endpoint.name}`);
-      console.log(`🌐 URL: ${endpoint.url}`);
+    // Request con timeout de 3 segundos
+    const controller = new AbortController();
+    const timeout = setTimeout(() => {
+      console.log('⏰ TIMEOUT - Request tardó más de 3 segundos');
+      controller.abort();
+    }, 3000);
 
-      try {
-        console.log(`📡 Enviando request...`);
+    console.log(`📡 Enviando request con timeout 3s...`);
+    
+    const response = await fetch(endpoint, {
+      method: 'POST',
+      headers: {
+        'Authorization': `OAuth2 ${accessToken}`,
+        'Content-Type': 'application/json'
+      },
+      body: requestBody,
+      signal: controller.signal
+    });
+
+    clearTimeout(timeout);
+    console.log(`📊 ¡RESPUESTA RECIBIDA! Status: ${response.status} ${response.statusText}`);
+
+    const responseText = await response.text();
+    console.log(`📄 Respuesta: ${responseText.substring(0, 100)}${responseText.length > 100 ? '...' : ''}`);
+
+    if (response.ok) {
+      console.log(`🎉 ¡ÉXITO! Endpoint funcionó correctamente!`);
+      console.log(`✅ WEBHOOK VALIDADO CON: ${endpoint}`);
+    } else {
+      console.log(`❌ Error: Status ${response.status}`);
+      
+      // Si es 404, probar endpoint alternativo rápidamente
+      if (response.status === 404) {
+        console.log(`🔄 Probando endpoint alternativo...`);
+        const altEndpoint = `https://api.podio.com/hook/validate/${hookId}`;
+        console.log(`🌐 Alt URL: ${altEndpoint}`);
         
-        const response = await fetch(endpoint.url, {
-          method: endpoint.method,
-          headers: {
-            'Authorization': `OAuth2 ${accessToken}`,
-            'Content-Type': 'application/json'
-          },
-          body: requestBody
-        });
-
-        console.log(`📊 Status recibido: ${response.status} ${response.statusText}`);
-
-        const responseText = await response.text();
-        console.log(`📄 Respuesta completa: ${responseText.substring(0, 200)}${responseText.length > 200 ? '...' : ''}`);
-
-        if (response.ok) {
-          console.log(`🎉 ¡ÉXITO! Endpoint ${endpoint.name} funcionó!`);
-          console.log(`✅ WEBHOOK VALIDADO CON: ${endpoint.url}`);
-          return; // Salir al encontrar uno que funciona
-        } else {
-          console.log(`❌ Falló con status ${response.status}`);
+        try {
+          const altController = new AbortController();
+          setTimeout(() => altController.abort(), 2000); // 2s timeout para alternativo
+          
+          const altResponse = await fetch(altEndpoint, {
+            method: 'POST',
+            headers: {
+              'Authorization': `OAuth2 ${accessToken}`,
+              'Content-Type': 'application/json'
+            },
+            body: requestBody,
+            signal: altController.signal
+          });
+          
+          console.log(`📊 Alt Status: ${altResponse.status}`);
+          
+          if (altResponse.ok) {
+            console.log(`🎉 ¡ÉXITO CON ALTERNATIVO!`);
+          } else {
+            console.log(`❌ Alternativo también falló: ${altResponse.status}`);
+          }
+        } catch (altError) {
+          console.log(`❌ Error en alternativo: ${altError.message}`);
         }
-
-      } catch (error) {
-        console.error(`💥 Error de red con ${endpoint.name}:`, error.message);
-      }
-
-      // Pequeña pausa entre requests
-      if (i < endpointsToTest.length - 1) {
-        console.log(`⏳ Pausa antes del siguiente...`);
-        await new Promise(resolve => setTimeout(resolve, 100));
       }
     }
 
-    console.log('❌ NINGÚN ENDPOINT FUNCIONÓ - Todos dieron error');
-    console.log('💡 Posibles causas: 1) Endpoint correcto no está en la lista, 2) Autenticación incorrecta, 3) Body format incorrecto');
-
   } catch (error) {
-    console.error('💥 Error general en pruebas:', error);
+    if (error.name === 'AbortError') {
+      console.error('⏰ Request cancelado por timeout');
+    } else {
+      console.error('💥 Error en prueba:', error.message);
+    }
   }
 }
