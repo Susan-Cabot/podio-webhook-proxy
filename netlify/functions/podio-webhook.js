@@ -72,6 +72,8 @@ async function testMultipleEndpoints(hookId, code) {
   console.log('🧪 Iniciando pruebas de múltiples endpoints...');
   
   try {
+    console.log('🔐 Solicitando token OAuth...');
+    
     // Obtener token OAuth
     const tokenResponse = await fetch('https://api.podio.com/oauth/token', {
       method: 'POST',
@@ -87,93 +89,90 @@ async function testMultipleEndpoints(hookId, code) {
       })
     });
 
+    console.log('📡 Respuesta OAuth status:', tokenResponse.status);
+
     if (!tokenResponse.ok) {
-      console.error('❌ Error obteniendo token OAuth:', await tokenResponse.text());
+      const errorText = await tokenResponse.text();
+      console.error('❌ Error obteniendo token OAuth:', tokenResponse.status, errorText);
       return;
     }
 
     const tokenData = await tokenResponse.json();
     const accessToken = tokenData.access_token;
-    console.log('✅ Token OAuth obtenido');
+    console.log('✅ Token OAuth obtenido exitosamente');
 
-    // Lista de endpoints a probar
+    // Lista REDUCIDA de endpoints más probables
     const endpointsToTest = [
-      // Basado en tu análisis (sin /verify)
+      // Basado en tu análisis (sin /verify) - ESTE ES EL MÁS PROBABLE
       { 
         url: `https://api.podio.com/hook/${hookId}/validate`, 
         method: 'POST',
-        name: 'POST /hook/{id}/validate (TU ANÁLISIS)'
+        name: 'POST /hook/{id}/validate'
       },
-      { 
-        url: `https://api.podio.com/hook/${hookId}/validate`, 
-        method: 'PUT',
-        name: 'PUT /hook/{id}/validate'
-      },
-      // Variaciones de estructura
+      // Estructura alternativa 
       { 
         url: `https://api.podio.com/hook/validate/${hookId}`, 
         method: 'POST',
         name: 'POST /hook/validate/{id}'
       },
+      // Solo el hook ID (como sugiere la documentación)
       { 
         url: `https://api.podio.com/hook/${hookId}`, 
         method: 'POST',
-        name: 'POST /hook/{id} (solo hook)'
-      },
-      { 
-        url: `https://api.podio.com/hook/${hookId}`, 
-        method: 'PUT',
-        name: 'PUT /hook/{id}'
-      },
-      // Con action
-      { 
-        url: `https://api.podio.com/hook/${hookId}/action/validate`, 
-        method: 'POST',
-        name: 'POST /hook/{id}/action/validate'
+        name: 'POST /hook/{id}'
       }
     ];
 
-    // Diferentes tipos de body a probar
-    const bodyVariations = [
-      { data: JSON.stringify({ code: code }), contentType: 'application/json', name: 'JSON' },
-      { data: `code=${code}`, contentType: 'application/x-www-form-urlencoded', name: 'FORM' },
-      { data: new URLSearchParams({ code: code }), contentType: 'application/x-www-form-urlencoded', name: 'URLSearchParams' }
-    ];
+    console.log(`🧪 Probando ${endpointsToTest.length} endpoints principales...`);
 
-    // Probar cada combinación
-    for (const endpoint of endpointsToTest) {
-      for (const bodyVar of bodyVariations) {
-        console.log(`\n🧪 Probando: ${endpoint.name} con ${bodyVar.name}`);
-        console.log(`🌐 URL: ${endpoint.url}`);
-        console.log(`📝 Method: ${endpoint.method}`);
-        console.log(`📄 Body: ${bodyVar.data}`);
+    // Solo JSON body (más probable)
+    const requestBody = JSON.stringify({ code: code });
+    console.log(`📄 Body a usar: ${requestBody}`);
 
-        try {
-          const response = await fetch(endpoint.url, {
-            method: endpoint.method,
-            headers: {
-              'Authorization': `OAuth2 ${accessToken}`,
-              'Content-Type': bodyVar.contentType
-            },
-            body: bodyVar.data
-          });
+    // Probar cada endpoint SECUENCIALMENTE con logs inmediatos
+    for (let i = 0; i < endpointsToTest.length; i++) {
+      const endpoint = endpointsToTest[i];
+      console.log(`\n${i+1}/${endpointsToTest.length} 🧪 Probando: ${endpoint.name}`);
+      console.log(`🌐 URL: ${endpoint.url}`);
 
-          const responseText = await response.text();
-          console.log(`📊 Resultado: ${response.status} ${response.statusText}`);
-          console.log(`📄 Respuesta: ${responseText}`);
+      try {
+        console.log(`📡 Enviando request...`);
+        
+        const response = await fetch(endpoint.url, {
+          method: endpoint.method,
+          headers: {
+            'Authorization': `OAuth2 ${accessToken}`,
+            'Content-Type': 'application/json'
+          },
+          body: requestBody
+        });
 
-          if (response.ok) {
-            console.log(`🎉 ¡ÉXITO! Endpoint funciona: ${endpoint.name} con ${bodyVar.name}`);
-            return; // Salir al encontrar uno que funciona
-          }
+        console.log(`📊 Status recibido: ${response.status} ${response.statusText}`);
 
-        } catch (error) {
-          console.error(`❌ Error con ${endpoint.name}:`, error.message);
+        const responseText = await response.text();
+        console.log(`📄 Respuesta completa: ${responseText.substring(0, 200)}${responseText.length > 200 ? '...' : ''}`);
+
+        if (response.ok) {
+          console.log(`🎉 ¡ÉXITO! Endpoint ${endpoint.name} funcionó!`);
+          console.log(`✅ WEBHOOK VALIDADO CON: ${endpoint.url}`);
+          return; // Salir al encontrar uno que funciona
+        } else {
+          console.log(`❌ Falló con status ${response.status}`);
         }
+
+      } catch (error) {
+        console.error(`💥 Error de red con ${endpoint.name}:`, error.message);
+      }
+
+      // Pequeña pausa entre requests
+      if (i < endpointsToTest.length - 1) {
+        console.log(`⏳ Pausa antes del siguiente...`);
+        await new Promise(resolve => setTimeout(resolve, 100));
       }
     }
 
-    console.log('❌ Ningún endpoint funcionó - todos dieron error');
+    console.log('❌ NINGÚN ENDPOINT FUNCIONÓ - Todos dieron error');
+    console.log('💡 Posibles causas: 1) Endpoint correcto no está en la lista, 2) Autenticación incorrecta, 3) Body format incorrecto');
 
   } catch (error) {
     console.error('💥 Error general en pruebas:', error);
