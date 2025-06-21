@@ -1,7 +1,6 @@
 exports.handler = async (event, context) => {
     console.log('🔔 Webhook recibido:', new Date().toISOString());
     console.log('📝 Method:', event.httpMethod);
-    console.log('📝 Headers:', JSON.stringify(event.headers, null, 2));
     
     if (event.httpMethod !== 'POST') {
         console.log('❌ Método no permitido:', event.httpMethod);
@@ -19,7 +18,7 @@ exports.handler = async (event, context) => {
         const data = Object.fromEntries(params);
         console.log('📊 Datos recibidos:', JSON.stringify(data, null, 2));
 
-        // VERIFICACIÓN WEBHOOK - MINIMALISTA
+        // VERIFICACIÓN WEBHOOK - CON API CALL
         if (params.get('type') === 'hook.verify') {
             const code = params.get('code');
             const hookId = params.get('hook_id');
@@ -28,16 +27,24 @@ exports.handler = async (event, context) => {
             console.log('📝 Hook ID:', hookId);
             console.log('🔑 Código recibido:', code);
             
+            // PASO 1: Responder inmediatamente a Podio
             const response = {
                 statusCode: 200,
-                headers: { 
-                    'Content-Type': 'text/plain'
-                },
+                headers: { 'Content-Type': 'text/plain' },
                 body: code
             };
             
-            console.log('📤 Enviando respuesta:', JSON.stringify(response, null, 2));
-            console.log('📤 Body de respuesta:', code);
+            console.log('📤 Enviando respuesta inmediata:', code);
+            
+            // PASO 2: Llamada API para completar verificación
+            try {
+                console.log('🔐 Iniciando verificación API...');
+                await validateHookWithPodioAPI(hookId, code);
+                console.log('🎉 ¡Verificación API completada exitosamente!');
+            } catch (error) {
+                console.error('❌ Error en verificación API:', error.message);
+                console.error('📋 Detalles error:', error);
+            }
             
             return response;
         }
@@ -73,3 +80,87 @@ exports.handler = async (event, context) => {
         };
     }
 };
+
+// FUNCIÓN PARA VALIDAR WEBHOOK VIA API PODIO
+async function validateHookWithPodioAPI(hookId, code) {
+    console.log('🔐 Obteniendo token OAuth...');
+    
+    // Credenciales Podio del proyecto
+    const credentials = {
+        client_id: 'api-regenerated',
+        client_secret: '9aEYP3rg0TEW53ywIbfXaelov3A9gIumQImsmQK3kERa3PY0JIqadWXKrglZtVvR',
+        app_id: '30361227',
+        app_token: 'fe2e7087f07470d142a5b883ef4a647e'
+    };
+    
+    // PASO 1: Obtener OAuth token
+    const tokenResponse = await fetch('https://api.podio.com/oauth/token', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/x-www-form-urlencoded'
+        },
+        body: new URLSearchParams({
+            grant_type: 'app',
+            app_id: credentials.app_id,
+            app_token: credentials.app_token,
+            client_id: credentials.client_id,
+            client_secret: credentials.client_secret
+        })
+    });
+    
+    if (!tokenResponse.ok) {
+        const errorText = await tokenResponse.text();
+        console.error('❌ Error OAuth:', tokenResponse.status, errorText);
+        throw new Error(`OAuth failed: ${tokenResponse.status} - ${errorText}`);
+    }
+    
+    const tokenData = await tokenResponse.json();
+    console.log('✅ Token OAuth obtenido');
+    
+    // PASO 2: Validar webhook
+    console.log('📡 Validando webhook via API...');
+    
+    const validateResponse = await fetch(`https://api.podio.com/hook/${hookId}/verify`, {
+        method: 'POST',
+        headers: {
+            'Authorization': `OAuth2 ${tokenData.access_token}`,
+            'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+            code: code
+        })
+    });
+    
+    console.log('📊 Respuesta validación:', validateResponse.status, validateResponse.statusText);
+    
+    if (!validateResponse.ok) {
+        const errorText = await validateResponse.text();
+        console.error('❌ Error validación:', validateResponse.status, errorText);
+        
+        // Intentar endpoint alternativo
+        console.log('🔄 Probando endpoint alternativo...');
+        const alternativeResponse = await fetch(`https://api.podio.com/hook/${hookId}/validate`, {
+            method: 'POST',
+            headers: {
+                'Authorization': `OAuth2 ${tokenData.access_token}`,
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                code: code
+            })
+        });
+        
+        console.log('📊 Respuesta alternativa:', alternativeResponse.status, alternativeResponse.statusText);
+        
+        if (!alternativeResponse.ok) {
+            const altErrorText = await alternativeResponse.text();
+            console.error('❌ Error endpoint alternativo:', alternativeResponse.status, altErrorText);
+            throw new Error(`Validation failed: ${validateResponse.status} - ${errorText}`);
+        }
+        
+        console.log('✅ Validación exitosa con endpoint alternativo');
+        return;
+    }
+    
+    console.log('✅ Validación exitosa');
+}
